@@ -32,6 +32,7 @@ import org.jboss.aerogear.unifiedpush.message.sender.GCMPushNotificationSender;
 import org.jboss.aerogear.unifiedpush.message.sender.SimplePushNotificationSender;
 import org.jboss.aerogear.unifiedpush.model.AndroidVariant;
 import org.jboss.aerogear.unifiedpush.model.PushApplication;
+import org.jboss.aerogear.unifiedpush.model.SafariVariant;
 import org.jboss.aerogear.unifiedpush.model.SimplePushVariant;
 import org.jboss.aerogear.unifiedpush.model.iOSVariant;
 import org.jboss.aerogear.unifiedpush.service.ClientInstallationService;
@@ -71,6 +72,7 @@ public class SenderServiceImpl implements SenderService {
         final Set<iOSVariant> iOSVariants = new HashSet<iOSVariant>();
         final Set<AndroidVariant> androidVariants = new HashSet<AndroidVariant>();
         final Set<SimplePushVariant> simplePushVariants = new HashSet<SimplePushVariant>();
+        final Set<SafariVariant> safariVariants = new HashSet<SafariVariant>();
 
         final SendCriteria criteria = message.getSendCriteria();
         final List<String> variantIDs = criteria.getVariants();
@@ -96,6 +98,8 @@ public class SenderServiceImpl implements SenderService {
                     case SIMPLE_PUSH:
                         simplePushVariants.add((SimplePushVariant) variant);
                         break;
+                    case SAFARI:
+                        safariVariants.add((SafariVariant) variant);
                     default:
                         // nope; should never enter here
                         break;
@@ -108,6 +112,7 @@ public class SenderServiceImpl implements SenderService {
             androidVariants.addAll(pushApplication.getAndroidVariants());
             iOSVariants.addAll(pushApplication.getIOSVariants());
             simplePushVariants.addAll(pushApplication.getSimplePushVariants());
+            safariVariants.addAll(pushApplication.getSafariVariants());
         }
 
         // all possible criteria
@@ -131,6 +136,14 @@ public class SenderServiceImpl implements SenderService {
                         aliases, deviceTypes);
                 this.sendToGCM(androidVariant, androidTokenPerVariant, message);
             }
+
+            // TODO: DISPATCH TO A QUEUE .....
+            for (SafariVariant safariVariant : safariVariants) {
+                final List<String> tokenPerVariant = clientInstallationService.findAllDeviceTokenForVariantIDByCriteria(safariVariant.getVariantID(), categories,
+                        aliases, deviceTypes);
+                this.sendToAPNsSafari(safariVariant, tokenPerVariant, message);
+
+            }
         }
 
         // TODO: DISPATCH TO A QUEUE .....
@@ -152,6 +165,11 @@ public class SenderServiceImpl implements SenderService {
     private void sendToAPNs(iOSVariant iOSVariant, Collection<String> tokens, UnifiedPushMessage pushMessage) {
         logger.fine(String.format("Sending: %s to APNs", pushMessage));
         apnsSender.sendPushMessage(iOSVariant, tokens, pushMessage);
+    }
+
+    private void sendToAPNsSafari(SafariVariant safariVariant, Collection<String> tokens, UnifiedPushMessage pushMessage) {
+        logger.fine(String.format("Sending: %s to APNs", pushMessage));
+        apnsSender.sendPushMessageSafari(safariVariant, tokens, pushMessage);
     }
 
     private void sendToGCM(AndroidVariant androidVariant, List<String> tokens, UnifiedPushMessage pushMessage) {

@@ -34,7 +34,12 @@ public enum VariantType {
     /**
      * The type identifier for our SimplePush variants. 
      */
-    SIMPLE_PUSH("simplePush");
+    SIMPLE_PUSH("simplePush"),
+
+    /**
+     * The type identifier for our Safari variants
+     */
+    SAFARI("safari");
 
     private final String typeName;
 

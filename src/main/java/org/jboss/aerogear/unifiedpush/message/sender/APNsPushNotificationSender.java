@@ -21,6 +21,7 @@ import com.notnoop.apns.ApnsService;
 import com.notnoop.apns.ApnsServiceBuilder;
 import com.notnoop.apns.EnhancedApnsNotification;
 import org.jboss.aerogear.unifiedpush.message.cache.APNsCache;
+import org.jboss.aerogear.unifiedpush.model.SafariVariant;
 import org.jboss.aerogear.unifiedpush.model.iOSVariant;
 import org.jboss.aerogear.unifiedpush.service.ClientInstallationService;
 import org.jboss.aerogear.unifiedpush.service.sender.message.UnifiedPushMessage;
@@ -28,9 +29,11 @@ import org.jboss.aerogear.unifiedpush.service.sender.message.UnifiedPushMessage;
 import javax.inject.Inject;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Date;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -45,6 +48,58 @@ public class APNsPushNotificationSender {
 
     @Inject
     private ClientInstallationService clientInstallationService;
+
+    /**
+     * Sends APNs notifications ({@link UnifiedPushMessage}) to all devices, that are represented by
+     * the {@link Collection} of tokens for the given {@link iOSVariant}.
+     *
+     * @param safariVariant the logical construct, needed to lookup the certificate and the passphrase.
+     * @param tokens collection of tokens, representing actual iOS devices
+     * @param pushMessage the payload to be submitted
+     */
+    public void sendPushMessageSafari(SafariVariant safariVariant, Collection<String> tokens, UnifiedPushMessage pushMessage) {
+        // no need to send empty list
+        if (tokens.isEmpty()) {
+            return;
+        }
+
+        ArrayList<String> urlArgs = (ArrayList<String>) pushMessage.getData().get("url-args");
+
+        String apnsMessage = APNS.newPayload()
+                // adding recognized key values
+                .alertBody(pushMessage.getAlert()) // alert dialog, in iOS
+                .alertTitle((String) pushMessage.getData().get("title"))
+                .urlArgs(urlArgs.toArray(new String[urlArgs.size()]))
+                .build(); // build the JSON payload, for APNs
+
+        ApnsService service = buildApnsServiceSafari(safariVariant);
+
+        if (service != null) {
+            try {
+                logger.fine(String.format("Sending transformed APNs payload: '%s' ", apnsMessage));
+                // send:
+                service.start();
+
+                Date expireDate = createFutureDateBasedOnTTL(pushMessage.getTimeToLive());
+                service.push(tokens, apnsMessage, expireDate);
+
+                // after sending, let's ask for the inactive tokens:
+                final Set<String> inactiveTokens = service.getInactiveDevices().keySet();
+
+                // transform the tokens to be all lower-case:
+                final Set<String> transformedTokens = lowerCaseAllTokens(inactiveTokens);
+
+                // trigger asynchronous deletion:
+                clientInstallationService.removeInstallationsForVariantByDeviceTokens(safariVariant.getVariantID(), transformedTokens);
+            } finally {
+
+                // tear down and release resources:
+                service.stop();
+            }
+        } else {
+            logger.severe("No certificate was found. Could not send messages to APNs");
+        }
+    }
 
     /**
      * Sends APNs notifications ({@link UnifiedPushMessage}) to all devices, that are represented by 
@@ -154,6 +209,33 @@ public class APNsPushNotificationSender {
             } else {
                 builder.withSandboxDestination();
             }
+
+            // create the service
+            return builder.build();
+        }
+        // null if, why ever, there was no cert/passphrase
+        return null;
+    }
+
+    private ApnsService buildApnsServiceSafari(SafariVariant safariVariant) {
+
+        // this check should not be needed, but you never know:
+        if (safariVariant.getCertificate() != null && safariVariant.getPassphrase() != null) {
+
+            final ApnsServiceBuilder builder = APNS.newService();
+
+            // add the certificate:
+            ByteArrayInputStream stream = new ByteArrayInputStream(safariVariant.getCertificate());
+            builder.withCert(stream, safariVariant.getPassphrase());
+
+            try {
+                // release the stream
+                stream.close();
+            } catch (IOException e) {
+                logger.log(Level.SEVERE, "Error reading certificate", e);
+            }
+
+            builder.withProductionDestination();
 
             // create the service
             return builder.build();
